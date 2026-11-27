@@ -237,11 +237,11 @@ const COLOR=Object.fromEntries(CATS);
 const BRANDS=['CAESS','DELSUR','EEO','DEUSEM','CLESA','ANDA','Claro','Tigo','Movistar','Super Selectos','Walmart','La Despensa de Don Juan','Maxi Despensa','PriceSmart','Pollo Campero','Pizza Hut','McDonald\'s','Farmacia San Nicolás','Farmacias Económicas','Farmacia Camila','Puma','Texaco','Uno','Shell','Freund','Vidrí','EPA','Siman'];
 const KEYWORDS={
   Supermercado:['super','selectos','walmart','despensa','maxi','pricesmart','mercado','la colonia','calleja','abarrot'],
-  Comida:['restaurante','pollo','campero','pizza','burger','cafe','café','pupuser','comida','mcdonald','wendy','subway','starbucks','panaderia','panadería','taco','sushi','kfc','bar '],
+  Comida:['restaurante','pollo','campero','pizza','burger','cafe','café','pupuser','comida','mcdonald','wendy','subway','starbucks','panaderia','panadería','taco','sushi','kfc','alimentos','frozen','limonada'],
   Transporte:['gasolinera','puma','texaco','shell','uno ','combustible','diesel','gasolina','parqueo','uber','taxi','peaje','llantas'],
   Salud:['farmacia','clinica','clínica','hospital','laboratorio','medic','dental','optica','óptica'],
   Servicios:['caess','delsur','aes','anda','claro','tigo','movistar','digicel','internet','telefon','agua','energia','energía','cable'],
-  Casa:['ferreter','vidri','freund','epa','muebl','hogar','casa','limpieza'],
+  Casa:['ferreter','vidri','freund',' epa ','muebl','hogar','limpieza'],
   Ropa:['ropa','zapat','calzado','boutique','moda','tienda de ropa','siman','sears','payless'],
   Educación:['libreria','librería','colegio','escuela','universidad','curso','papeler'],
   Ocio:['cine','cinemark','cinepolis','juego','netflix','spotify','teatro','parque','entrada']};
@@ -311,7 +311,7 @@ function fmtDate(f){if(!f)return'';const [y,m,d]=f.split('-').map(Number);return
 
 /* ---------- formulario ---------- */
 function openForm(it,photo){
-  S.edit=it||null;S.photo=photo||null;
+  S.edit=it||null;S.photo=photo||null;S.guess=null;
   $('ftitle').textContent=it?'Editar gasto':'Nuevo gasto';
   $('ffecha').value=it?.fecha||today();$('fcatSel').value=it?.categoria||'Comida';
   $('fcom').value=it?.comercio||'';$('fdesc').value=it?.descripcion||'';
@@ -344,30 +344,58 @@ async function getOcr(){
 function num(s){s=s.replace(/\s/g,'');const m=s.match(/(\d[\d.,]*)[.,](\d{2})$/);if(!m)return NaN;return parseFloat(m[1].replace(/[.,]/g,'')+'.'+m[2])}
 function parseTicket(text){
   const lines=text.split('\n').map(l=>l.trim()).filter(Boolean),out={};
-  const amt=/\$?\s?(\d{1,3}(?:[.,]\d{3})*[.,]\d{2}|\d+[.,]\d{2})(?!\d)/g;
-  let best=null;
-  lines.forEach(l=>{if(/total/i.test(l)&&!/sub\s*-?\s*total/i.test(l)){const v=[...l.matchAll(amt)].map(m=>num(m[1])).filter(isFinite);if(v.length){const x=v[v.length-1];if(!best||/pagar/i.test(l)||x>best)best=x}}});
-  if(best==null){const all=lines.flatMap(l=>[...l.matchAll(amt)].map(m=>num(m[1]))).filter(v=>isFinite(v)&&v<100000);if(all.length)best=Math.max(...all)}
-  if(best!=null)out.total=best;
-  const now=new Date();
-  for(const l of lines){let m=l.match(/(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/),y,mo,d;
-    if(m){y=+m[1];mo=+m[2];d=+m[3]}else if(m=l.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/)){d=+m[1];mo=+m[2];y=+m[3];if(y<100)y+=2000}
-    if(m&&mo>=1&&mo<=12&&d>=1&&d<=31&&y>2000&&new Date(y,mo-1,d)<=new Date(now.getTime()+864e5)){out.fecha=y+'-'+pad(mo)+'-'+pad(d);break}}
-  const skip=/factura|ticket|recibo|nit|nrc|tel|fecha|caja|cliente|direcc|www|@|giro|total|monto|iva|pagar|concepto|cargo|saldo|efectivo|cambio/i;
+  const amt=/\$?\s?(\d{1,3}(?:[.,]\d{3})*[.,]\d{2}|\d+[.,]\d{2})(?![\d%])/g;
+  const amounts=l=>{let v=[...l.matchAll(amt)].map(m=>num(m[1])).filter(isFinite);
+    if(!v.length){const m=l.match(/(\d{1,5})\s(\d{2})\s*$/);if(m)v=[parseFloat(m[1]+'.'+m[2])]}return v};
+  const lastAmt=i=>{const v=amounts(lines[i]);if(v.length)return v[v.length-1];
+    if(i+1<lines.length&&!/[a-z]{3,}/i.test(lines[i+1])){const w=amounts(lines[i+1]);if(w.length)return w[0]}return null};
+  // Prioridad: "total a pagar" > "total" > lo pagado
+  const FINAL=/total\s*a\s*pagar|a\s*pagar|monto\s*total|total\s*pagado|gran\s*total|importe\s*total|total\s*cobrado|total\s*general|neto\s*a\s*pagar/i;
+  const PLAIN=/total/i,NOTTOTAL=/sub\s*-?\s*total|sumatoria|iva|exent|gravad|no\s*sujet|retenid|percibid|items|art[ií]culos/i;
+  let fin=null,plain=null,tip=0,paid=0,change=0;
+  lines.forEach((l,i)=>{
+    if(FINAL.test(l)){const v=lastAmt(i);if(v!=null&&v<100000)fin=v}
+    else if(PLAIN.test(l)&&!NOTTOTAL.test(l)){const v=lastAmt(i);if(v!=null&&v<100000&&(plain==null||v>plain))plain=v}
+    else if(/servicio|propina|tip\b/i.test(l)&&!/%\s*$/.test(l)){const v=lastAmt(i);if(v!=null&&v<10000)tip=Math.max(tip,v)}
+    if(/cambio|vuelto/i.test(l)){const v=lastAmt(i);if(v)change+=v}
+    else if(/tarjeta|cr[eé]dito|d[eé]bito|transferencia|remesa|efectivo|pago\s|cheque|visa|mastercard/i.test(l)&&!FINAL.test(l)){const v=lastAmt(i);if(v)paid+=v}});
+  let total=fin??(plain!=null?Math.round((plain+tip)*100)/100:null);
+  const net=Math.round((paid-change)*100)/100;
+  if(net>0&&(total==null||(net>total&&net<=total*1.3)))total=net;
+  if(total==null){const all=lines.flatMap(amounts).filter(v=>v<100000);if(all.length)total=Math.max(...all)}
+  if(total!=null)out.total=total;
+  if(tip&&total&&total>tip)out.propina=tip;
+  // Fecha (acepta espacios alrededor de / - .)
+  const now=new Date(),S1='\\s*[\\/\\-.]\\s*';
+  const reYMD=new RegExp('(20\\d{2})'+S1+'(\\d{1,2})'+S1+'(\\d{1,2})'),reDMY=new RegExp('(\\d{1,2})'+S1+'(\\d{1,2})'+S1+'(20\\d{2}|\\d{2})(?!\\d)');
+  const ok=(y,mo,d)=>mo>=1&&mo<=12&&d>=1&&d<=31&&y>2000&&new Date(y,mo-1,d)<=new Date(now.getTime()+864e5)&&new Date(y,mo-1,d)>new Date(now.getTime()-3*365*864e5);
+  const order=lines.map((l,i)=>i).sort((a,b)=>(/fecha|emisi|generaci/i.test(lines[b-1]||'')||/fecha/i.test(lines[b])?1:0)-(/fecha|emisi|generaci/i.test(lines[a-1]||'')||/fecha/i.test(lines[a])?1:0));
+  for(const i of order){const l=lines[i];let m=l.match(reYMD),y,mo,d;
+    if(m){y=+m[1];mo=+m[2];d=+m[3]}else if(m=l.match(reDMY)){d=+m[1];mo=+m[2];y=+m[3];if(y<100)y+=2000}
+    if(m&&ok(y,mo,d)){out.fecha=y+'-'+pad(mo)+'-'+pad(d);break}}
+  // Comercio
+  const skip=/factura|ticket|recibo|nit|nrc|tel|fecha|caja|cliente|direcc|www|@|giro|total|monto|iva|pagar|concepto|cargo|saldo|efectivo|cambio|avenida|calle|colonia|boulevard|blvd|casa matriz|sucursal|frente|contiguo|correo|c[oó]digo/i;
   const brand=BRANDS.find(b=>new RegExp('(^|[^a-záéíóúñ])'+b.toLowerCase().replace(/[.*+?^${}()|[\]\\']/g,'\\$&')+'($|[^a-záéíóúñ])').test(text.toLowerCase()));
   const name=brand||lines.slice(0,6).find(l=>/[a-záéíóúñ]{4,}/i.test(l)&&(l.match(/[aeiouáéíóú]/gi)||[]).length>=2&&!skip.test(l)&&!/\d{4,}/.test(l));
-  if(brand)out.comercio=brand;else if(name)out.comercio=name.replace(/[^\wáéíóúñÁÉÍÓÚÑ&.,' -]/g,'').trim().toLowerCase().replace(/(^|\s)\S/g,c=>c.toUpperCase()).slice(0,60);
-  const low=' '+text.toLowerCase()+' ';
-  for(const [c,ks] of Object.entries(KEYWORDS))if(ks.some(k=>low.includes(k))){out.categoria=c;break}
+  if(brand)out.comercio=brand;
+  else if(name){let c=name.replace(/[^a-záéíóúñ0-9&.' -]/gi,' ').replace(/\s+/g,' ').trim().split(' ').filter((w,k,a)=>!(k===a.length-1&&w.replace(/[^a-z]/gi,'').length<3)).join(' ');
+    if(c.length>=3)out.comercio=c.toLowerCase().replace(/(^|\s)\S/g,ch=>ch.toUpperCase()).slice(0,60)}
+  // Categoría: primero el giro y las pistas fuertes
+  const low=' '+text.toLowerCase()+' ',giro=(lines.find(l=>/giro|actividad/i.test(l))||'').toLowerCase();
+  if(out.propina||/restaurante|comida|alimentos preparados|cafeter|bebidas/.test(giro))out.categoria='Comida';
+  else{const src=giro.length>10?giro:low;
+    for(const [c,ks] of Object.entries(KEYWORDS))if(ks.some(k=>src.includes(k))){out.categoria=c;break}
+    if(!out.categoria&&src!==low)for(const [c,ks] of Object.entries(KEYWORDS))if(ks.some(k=>low.includes(k))){out.categoria=c;break}}
   return out}
 async function readTicket(canvas,pdfText){
   status('Preparando el lector…',0);
   try{let text=pdfText;if(!text){const w=await getOcr();text=(await w.recognize(canvas)).data.text||''}const r=parseTicket(text);
+    S.guess=r.comercio||null;const al=S.cfg.alias||{},co=S.cfg.catOf||{};if(r.comercio&&al[r.comercio])r.comercio=al[r.comercio];if(r.comercio&&co[r.comercio])r.categoria=co[r.comercio];
     if(r.fecha)$('ffecha').value=r.fecha;if(r.comercio&&!$('fcom').value)$('fcom').value=r.comercio;
     if(r.categoria)$('fcatSel').value=r.categoria;
     if(r.comercio&&!$('fdesc').value)$('fdesc').value='Compra en '+r.comercio;
     if(r.total){$('ftotal').value=r.total.toFixed(2);if(!$('fmonto').value)$('fmonto').value=r.total.toFixed(2)}
-    status(r.total?'Revisa los datos y corrige lo que haga falta antes de guardar.':'No encontré el total. Escríbelo y confirma.')}
+    status(r.total?(r.propina?'Total con servicio/propina incluido ('+money(r.propina)+'). ':'')+'Revisa los datos y corrige lo que haga falta antes de guardar.':'No encontré el total. Escríbelo y confirma.')}
   catch(e){status(navigator.onLine?'No se pudo leer el ticket. Escribe los datos y confirma.':'Sin internet: el lector necesita conexión la primera vez. Escribe los datos y confirma.')}
 }
 $('photo').addEventListener('change',async e=>{
@@ -407,6 +435,10 @@ $('fsave').onclick=async()=>{
     monto:Math.round(monto*100)/100,total:Math.round((isFinite(total)?total:monto)*100)/100,creado:S.edit?.creado||Date.now()};
   $('fsave').disabled=true;
   if(S.photo&&!S.edit){try{await put('fotos',S.photo,it.id);it.foto=true}catch(e){toast('El gasto se guardará sin la foto: no hay espacio.')}}
+  if(!S.edit&&it.comercio){let ch=false;S.cfg.alias=S.cfg.alias||{};S.cfg.catOf=S.cfg.catOf||{};
+    if(S.guess&&S.guess!==it.comercio&&S.cfg.alias[S.guess]!==it.comercio){S.cfg.alias[S.guess]=it.comercio;ch=true}
+    if(S.guess&&S.cfg.catOf[it.comercio]!==it.categoria){S.cfg.catOf[it.comercio]=it.categoria;ch=true}
+    if(ch){try{await put('cfg',S.cfg,'cfg')}catch(e){}}}
   const ok=await saveItem(it);$('fsave').disabled=false;
   if(ok){const was=!!S.edit;closeAll();S.month=it.fecha.slice(0,7);render();toast(was?'Gasto actualizado':'Gasto guardado')}
 };
@@ -442,7 +474,7 @@ function fillBudget(){
 }
 $('saveBudget').onclick=async()=>{
   const cats={};document.querySelectorAll('[data-cat]').forEach(i=>{const v=parseFloat(i.value);if(v>0)cats[i.dataset.cat]=v});
-  S.cfg={budget:Math.max(0,parseFloat($('budget').value)||0),cats};render();
+  S.cfg={...S.cfg,budget:Math.max(0,parseFloat($('budget').value)||0),cats};render();
   try{await put('cfg',S.cfg,'cfg');toast('Presupuesto guardado')}catch(e){toast('No se pudo guardar el presupuesto.')}
 };
 
@@ -593,7 +625,8 @@ $('restoreFile').addEventListener('change',async e=>{
     if(typeof ph==='string'&&ph.startsWith('data:image/')){try{await put('fotos',ph,it.id);it.foto=true}catch(err){}}
     try{await put('gastos',it);n++}catch(err){}}
   if(Array.isArray(d.fijos)){for(const f of d.fijos){if(!f||typeof f.id!=='string')continue;const n={id:f.id,nombre:String(f.nombre||'').slice(0,80),monto:Number(f.monto)||0,dia:Math.min(31,Math.max(1,parseInt(f.dia,10)||1)),categoria:COLOR[f.categoria]?f.categoria:'Otros',activo:f.activo!==false,desde:/^\d{4}-\d{2}$/.test(f.desde)?f.desde:today().slice(0,7)};const k=S.fijos.findIndex(x=>x.id===n.id);if(k>=0)S.fijos[k]=n;else S.fijos.push(n)}await saveFijos()}
-  if(d.cfg&&typeof d.cfg==='object'){S.cfg={budget:Number(d.cfg.budget)||0,cats:d.cfg.cats&&typeof d.cfg.cats==='object'?d.cfg.cats:{},skips:d.cfg.skips&&typeof d.cfg.skips==='object'?d.cfg.skips:{}};try{await put('cfg',S.cfg,'cfg')}catch(err){}}
+  if(d.cfg&&typeof d.cfg==='object'){S.cfg={budget:Number(d.cfg.budget)||0,cats:d.cfg.cats&&typeof d.cfg.cats==='object'?d.cfg.cats:{},skips:d.cfg.skips&&typeof d.cfg.skips==='object'?d.cfg.skips:{},alias:{},catOf:{}};
+    for(const k of ['alias','catOf'])if(d.cfg[k]&&typeof d.cfg[k]==='object')for(const [a,b] of Object.entries(d.cfg[k]))if(typeof b==='string'&&(k!=='catOf'||COLOR[b]))S.cfg[k][String(a).slice(0,80)]=b.slice(0,80);try{await put('cfg',S.cfg,'cfg')}catch(err){}}
   S.items=await getAll('gastos');render();fillBudget();toast(n+' gastos restaurados');
 });
 
