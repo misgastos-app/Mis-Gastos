@@ -1,0 +1,30 @@
+MIS GASTOS — cómo publicarla en GitHub Pages
+============================================
+
+Archivos que debes subir (todos, sin carpeta):
+  index.html, manifest.webmanifest, sw.js, icon-192.png, icon-512.png
+  (Este LEEME.txt es opcional.)
+
+1. Crea una cuenta gratis en github.com.
+2. Toca "+" > "New repository". Nombre: mis-gastos. Marca "Public". Toca "Create repository".
+3. En el repositorio: "Add file" > "Upload files". Arrastra los archivos de arriba
+   (no la carpeta). Toca "Commit changes".
+4. Ve a Settings > Pages (sección "Code and automation").
+   En Source elige "Deploy from a branch", en Branch elige "main" y "/(root)". Toca Save.
+5. En 1 o 2 minutos aparece tu enlace:  https://TU-USUARIO.github.io/mis-gastos/
+6. Ábrelo en el celular y agrégalo a la pantalla de inicio:
+   - Android (Chrome): botón "Instalar en mi teléfono" o menú ⋮ > "Agregar a la pantalla principal".
+   - iPhone (Safari): botón Compartir > "Agregar a inicio".
+
+Para actualizar la app: "Add file" > "Upload files", sube los archivos nuevos con el mismo
+nombre y toca "Commit changes". El enlace no cambia.
+
+Bueno saber
+-----------
+- Nadie necesita cuenta. Cada persona guarda sus gastos y tickets solo en su teléfono.
+- El lector de tickets necesita internet la primera vez (descarga unos 10–15 MB).
+  Después, la app funciona sin conexión.
+- Usa "Presupuesto y respaldo" > "Descargar respaldo" de vez en cuando. Si borras los
+  datos del navegador o cambias de teléfono, restauras ese archivo y recuperas todo.
+- El lector acierta mejor con tickets planos, bien iluminados y enfocados.
+  Siempre revisa los datos antes de confirmar.
