@@ -79,6 +79,7 @@ label{display:grid;gap:4px;font-size:14px;color:var(--soft);font-weight:600}
 .status{font-size:14px;padding:10px 12px;border-radius:10px;background:var(--sea)}
 .row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1 1 140px}
 .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:12px;display:none;gap:12px;align-items:center;z-index:30;max-width:92vw}
+[hidden]{display:none!important}
 .toast.on{display:flex}.toast button{min-height:36px;background:transparent;color:var(--bg);border-color:var(--bg)}
 .full{width:100%;max-height:75vh;object-fit:contain;border-radius:12px}
 textarea{min-height:140px}
@@ -181,6 +182,7 @@ textarea{min-height:140px}
 {
 const CATS=[["Comida","#d6127e"],["Supermercado","#1f7a5a"],["Transporte","#2b6cb0"],["Casa","#a8551b"],["Servicios","#6b5bd6"],["Salud","#c0283a"],["Ocio","#d98a00"],["Ropa","#2f8f9d"],["Educación","#5a6b2e"],["Otros","#5d6b73"]];
 const COLOR=Object.fromEntries(CATS);
+const BRANDS=['CAESS','DELSUR','EEO','DEUSEM','CLESA','ANDA','Claro','Tigo','Movistar','Super Selectos','Walmart','La Despensa de Don Juan','Maxi Despensa','PriceSmart','Pollo Campero','Pizza Hut','McDonald\'s','Farmacia San Nicolás','Farmacias Económicas','Farmacia Camila','Puma','Texaco','Uno','Shell','Freund','Vidrí','EPA','Siman'];
 const KEYWORDS={
   Supermercado:['super','selectos','walmart','despensa','maxi','pricesmart','mercado','la colonia','calleja','abarrot'],
   Comida:['restaurante','pollo','campero','pizza','burger','cafe','café','pupuser','comida','mcdonald','wendy','subway','starbucks','panaderia','panadería','taco','sushi','kfc','bar '],
@@ -202,8 +204,15 @@ const S={items:[],cfg:{budget:0,cats:{}},month:today().slice(0,7),edit:null,phot
 let dbp=null;
 function idb(){return dbp||(dbp=new Promise((res,rej)=>{const r=indexedDB.open('mis-gastos',1);
   r.onupgradeneeded=()=>{const d=r.result;d.createObjectStore('gastos',{keyPath:'id'});d.createObjectStore('fotos');d.createObjectStore('cfg')};
-  r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}))}
-async function tx(store,mode,fn){const d=await idb();return new Promise((res,rej)=>{const t=d.transaction(store,mode),s=t.objectStore(store);const r=fn(s);t.oncomplete=()=>res(r&&'result' in r?r.result:undefined);t.onerror=()=>rej(t.error);t.onabort=()=>rej(t.error)})}
+  r.onsuccess=()=>{const d=r.result;d.onclose=()=>{dbp=null};d.onversionchange=()=>{d.close();dbp=null};res(d)};
+  r.onerror=()=>{dbp=null;rej(r.error)};r.onblocked=()=>{dbp=null;rej(new Error('blocked'))}}))}
+function tx1(d,store,mode,fn){return new Promise((res,rej)=>{let t;try{t=d.transaction(store,mode)}catch(e){rej(e);return}
+  const s=t.objectStore(store);const r=fn(s);t.oncomplete=()=>res(r&&'result' in r?r.result:undefined);t.onerror=()=>rej(t.error);t.onabort=()=>rej(t.error)})}
+async function tx(store,mode,fn){
+  try{return await tx1(await idb(),store,mode,fn)}
+  catch(e){if(e&&e.name==='QuotaExceededError')throw e;
+    try{(await dbp)?.close()}catch(_){}dbp=null;
+    return await tx1(await idb(),store,mode,fn)}}
 const put=(st,v,k)=>tx(st,'readwrite',s=>k===undefined?s.put(v):s.put(v,k));
 const del=(st,k)=>tx(st,'readwrite',s=>s.delete(k));
 const getOne=(st,k)=>tx(st,'readonly',s=>s.get(k));
@@ -218,7 +227,7 @@ async function load(){
 }
 async function saveItem(it){
   const i=S.items.findIndex(x=>x.id===it.id);if(i>=0)S.items[i]=it;else S.items.push(it);render();
-  try{await put('gastos',it);return true}catch(e){toast('No se pudo guardar: el teléfono no tiene espacio.');return false}}
+  try{await put('gastos',it);return true}catch(e){if(i<0){S.items=S.items.filter(x=>x!==it);render()}toast(e&&e.name==='QuotaExceededError'?'No se pudo guardar: el teléfono no tiene espacio.':'No se pudo guardar. Cierra la app, ábrela de nuevo e inténtalo otra vez.');return false}}
 async function delItem(id){S.items=S.items.filter(x=>x.id!==id);render();try{await del('gastos',id);await del('fotos',id)}catch(e){}}
 
 /* ---------- vista ---------- */
@@ -291,9 +300,10 @@ function parseTicket(text){
   for(const l of lines){let m=l.match(/(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/),y,mo,d;
     if(m){y=+m[1];mo=+m[2];d=+m[3]}else if(m=l.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/)){d=+m[1];mo=+m[2];y=+m[3];if(y<100)y+=2000}
     if(m&&mo>=1&&mo<=12&&d>=1&&d<=31&&y>2000&&new Date(y,mo-1,d)<=new Date(now.getTime()+864e5)){out.fecha=y+'-'+pad(mo)+'-'+pad(d);break}}
-  const skip=/factura|ticket|recibo|nit|nrc|tel|fecha|caja|cliente|direcc|www|@|giro/i;
-  const name=lines.slice(0,6).find(l=>(l.match(/[a-záéíóúñ]/gi)||[]).length>=3&&!skip.test(l)&&!/\d{4,}/.test(l));
-  if(name)out.comercio=name.replace(/[^\wáéíóúñÁÉÍÓÚÑ&.,' -]/g,'').trim().toLowerCase().replace(/(^|\s)\S/g,c=>c.toUpperCase()).slice(0,60);
+  const skip=/factura|ticket|recibo|nit|nrc|tel|fecha|caja|cliente|direcc|www|@|giro|total|monto|iva|pagar|concepto|cargo|saldo|efectivo|cambio/i;
+  const brand=BRANDS.find(b=>new RegExp('(^|[^a-záéíóúñ])'+b.toLowerCase().replace(/[.*+?^${}()|[\]\\']/g,'\\$&')+'($|[^a-záéíóúñ])').test(text.toLowerCase()));
+  const name=brand||lines.slice(0,6).find(l=>/[a-záéíóúñ]{4,}/i.test(l)&&(l.match(/[aeiouáéíóú]/gi)||[]).length>=2&&!skip.test(l)&&!/\d{4,}/.test(l));
+  if(brand)out.comercio=brand;else if(name)out.comercio=name.replace(/[^\wáéíóúñÁÉÍÓÚÑ&.,' -]/g,'').trim().toLowerCase().replace(/(^|\s)\S/g,c=>c.toUpperCase()).slice(0,60);
   const low=' '+text.toLowerCase()+' ';
   for(const [c,ks] of Object.entries(KEYWORDS))if(ks.some(k=>low.includes(k))){out.categoria=c;break}
   return out}

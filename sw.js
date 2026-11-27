@@ -1,5 +1,5 @@
 // Guarda la app en el teléfono para que funcione sin internet.
-const VERSION = 'mis-gastos-v1';
+const VERSION = 'mis-gastos-v2';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 const CDN = ['cdn.jsdelivr.net', 'tessdata.projectnaptha.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 
